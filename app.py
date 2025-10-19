@@ -200,7 +200,7 @@ async def say(
 async def image(
     interaction: Interaction,
     image_prompt: str,
-    image_model: Literal["dall-e-2", "dall-e-3", "gpt-image-1"] = "dall-e-3",
+    image_model: Literal["dall-e-2", "dall-e-3", "gpt-image-1", "gpt-image-1-mini"] = "gpt-image-1-mini",
     background: Literal["transparent", "opaque", "auto"] = "auto",
 ) -> None:
     context = await create_command_context(
@@ -303,7 +303,7 @@ async def vision(interaction: Interaction, attachment: discord.Attachment, visio
     openai_client = await get_openai_client(interaction.guild_id)
 
     response = await openai_client.responses.create(
-        model=config.get("OPENAI_GENERAL", "vision_model", fallback="gpt-4o"),
+        model=config.get("OPENAI_GENERAL", "vision_model", fallback="gpt-5-mini"),
         input=[
             {
                 "role": "user",
@@ -356,9 +356,7 @@ async def chat(
     interaction: Interaction,
     chat_prompt: str,
     keep_chatting: Literal["Yes", "No"] = "No",
-    chat_model: Literal[
-        "gpt-3.5-turbo", "gpt-4o-mini", "gpt-4.5-preview", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"
-    ] = "gpt-4o-mini",
+    chat_model: Literal["gpt-5-mini", "gpt-5", "gpt-4.1"] = "gpt-5-mini",
     custom_instructions: Optional[str] = None,
 ) -> None:
 
