@@ -36,7 +36,7 @@ async def new_response(
     context: CommandContext,
     prompt: str,
     openai_client: Optional[AsyncOpenAI] = None,
-    model: str = "gpt-4o-mini",
+    model: str = "gpt-5-mini",
 ) -> Response:
     """
     Generate a new response with the OpenAI Response API and store its ID
@@ -52,9 +52,6 @@ async def new_response(
         "OPENAI_INSTRUCTIONS", context.params.get("topic")
     )
 
-    # limit the response output to conform to Discord character limit
-    max_output_tokens = config.getint("OPENAI_GENERAL", "max_output_tokens", fallback=500)
-
     if not openai_client:
         openai_client = await get_openai_client(guild_id=context.guild_id)
 
@@ -65,7 +62,6 @@ async def new_response(
         model=model,
         instructions=instructions,
         previous_response_id=previous_response_id,
-        max_output_tokens=max_output_tokens,
     )
 
     await update_chat(response_id=response.id, context=context)

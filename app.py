@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 import discord
 from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
 from openai import BadRequestError
-from openai.types import Image
+from openai.types import Image, ImagesResponse
 
 from ai_helpers import (
     check_model_limit,
@@ -200,7 +200,7 @@ async def say(
 async def image(
     interaction: Interaction,
     image_prompt: str,
-    image_model: Literal["dall-e-2", "dall-e-3", "gpt-image-1"] = "dall-e-3",
+    image_model: Literal["dall-e-2", "dall-e-3", "gpt-image-1", "gpt-image-1-mini"] = "gpt-image-1-mini",
     background: Literal["transparent", "opaque", "auto"] = "auto",
 ) -> None:
     context = await create_command_context(
@@ -220,7 +220,7 @@ async def image(
     )
 
     # gpt-image-1 has some special use cases that don't apply to dall-e-2/3
-    if image_model != "gpt-image-1":
+    if "gpt-image-1" not in image_model:
         _ = submission_params.pop("background")
         submission_params["response_format"] = "b64_json"
     else:
@@ -235,17 +235,18 @@ async def image(
 
         submission_params["moderation"] = "low"
 
-        # set a footer showing usage information. Will not collide with dall-e-3 below because this is gpt-image-1 only
-        embed.set_footer(
-            text=(
-                f"Used {usage_tracker[interaction.guild_id][image_model]["count"]} "
-                f"out of {usage_tracker[interaction.guild_id][image_model]["limit"]} "
-                f"image generations with {image_model} today."
+        # set a footer showing usage information for gpt-image-1 (not mini)
+        if image_model == "gpt-image-1":
+            embed.set_footer(
+                text=(
+                    f"Used {usage_tracker[interaction.guild_id][image_model]["count"]} "
+                    f"out of {usage_tracker[interaction.guild_id][image_model]["limit"]} "
+                    f"image generations with {image_model} today."
+                )
             )
-        )
 
     try:
-        image_response = await openai_client.images.generate(**submission_params)
+        image_response: ImagesResponse = await openai_client.images.generate(**submission_params)
     except BadRequestError:
         await interaction.followup.send(
             f"Your prompt:\n> {image_prompt}\nProbably violated OpenAI's content policies. Clean up your act."
@@ -255,7 +256,7 @@ async def image(
     image_object: Image = image_response.data[0]
 
     # save the generated image to a file
-    file_name = f"image_{image_response.created}.png"
+    file_name = f"{image_model}-{image_response.created}.png"
     path = content_path(context=context, file_name=file_name)
     image_bytes = base64.b64decode(image_object.b64_json)
 
@@ -303,7 +304,7 @@ async def vision(interaction: Interaction, attachment: discord.Attachment, visio
     openai_client = await get_openai_client(interaction.guild_id)
 
     response = await openai_client.responses.create(
-        model=config.get("OPENAI_GENERAL", "vision_model", fallback="gpt-4o"),
+        model=config.get("OPENAI_GENERAL", "vision_model", fallback="gpt-5-mini"),
         input=[
             {
                 "role": "user",
@@ -356,9 +357,7 @@ async def chat(
     interaction: Interaction,
     chat_prompt: str,
     keep_chatting: Literal["Yes", "No"] = "No",
-    chat_model: Literal[
-        "gpt-3.5-turbo", "gpt-4o-mini", "gpt-4.5-preview", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"
-    ] = "gpt-4o-mini",
+    chat_model: Literal["gpt-5-mini", "gpt-5", "gpt-4.1"] = "gpt-5-mini",
     custom_instructions: Optional[str] = None,
 ) -> None:
 
