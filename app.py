@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 import discord
 from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
 from openai import BadRequestError
-from openai.types import Image
+from openai.types import Image, ImagesResponse
 
 from ai_helpers import (
     check_model_limit,
@@ -220,7 +220,7 @@ async def image(
     )
 
     # gpt-image-1 has some special use cases that don't apply to dall-e-2/3
-    if image_model != "gpt-image-1":
+    if "gpt-image-1" not in image_model:
         _ = submission_params.pop("background")
         submission_params["response_format"] = "b64_json"
     else:
@@ -235,17 +235,18 @@ async def image(
 
         submission_params["moderation"] = "low"
 
-        # set a footer showing usage information. Will not collide with dall-e-3 below because this is gpt-image-1 only
-        embed.set_footer(
-            text=(
-                f"Used {usage_tracker[interaction.guild_id][image_model]["count"]} "
-                f"out of {usage_tracker[interaction.guild_id][image_model]["limit"]} "
-                f"image generations with {image_model} today."
+        # set a footer showing usage information for gpt-image-1 (not mini)
+        if image_model == "gpt-image-1":
+            embed.set_footer(
+                text=(
+                    f"Used {usage_tracker[interaction.guild_id][image_model]["count"]} "
+                    f"out of {usage_tracker[interaction.guild_id][image_model]["limit"]} "
+                    f"image generations with {image_model} today."
+                )
             )
-        )
 
     try:
-        image_response = await openai_client.images.generate(**submission_params)
+        image_response: ImagesResponse = await openai_client.images.generate(**submission_params)
     except BadRequestError:
         await interaction.followup.send(
             f"Your prompt:\n> {image_prompt}\nProbably violated OpenAI's content policies. Clean up your act."
@@ -255,7 +256,7 @@ async def image(
     image_object: Image = image_response.data[0]
 
     # save the generated image to a file
-    file_name = f"image_{image_response.created}.png"
+    file_name = f"{image_model}-{image_response.created}.png"
     path = content_path(context=context, file_name=file_name)
     image_bytes = base64.b64decode(image_object.b64_json)
 
