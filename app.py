@@ -228,7 +228,7 @@ async def image(
         if not check_model_limit(context=context, usage_tracker=usage_tracker):
 
             await interaction.followup.send(
-                content=f"`{context.params["model"]}` been used too much today. Try again tomorrow!"
+                content=f"`{context.params['model']}` been used too much today. Try again tomorrow!"
             )
 
             return
@@ -239,8 +239,8 @@ async def image(
         if image_model == "gpt-image-1":
             embed.set_footer(
                 text=(
-                    f"Used {usage_tracker[interaction.guild_id][image_model]["count"]} "
-                    f"out of {usage_tracker[interaction.guild_id][image_model]["limit"]} "
+                    f"Used {usage_tracker[interaction.guild_id][image_model]['count']} "
+                    f"out of {usage_tracker[interaction.guild_id][image_model]['limit']} "
                     f"image generations with {image_model} today."
                 )
             )
@@ -273,6 +273,58 @@ async def image(
     file_upload = discord.File(fp=path, filename=file_name)
 
     await interaction.followup.send(file=file_upload, embed=embed)
+
+    return await context.save()
+
+
+@tree.command(name="video", description="Generate a video using a prompt.")
+@app_commands.describe(
+    video_prompt="The prompt used for video generation.",
+    video_model="The OpenAI video model to use.",
+    seconds="Total duration in seconds.",
+    size="The video's output resolution.",
+)
+async def video(
+    interaction: Interaction,
+    video_prompt: str,
+    video_model: Literal["sora-2", "sora-2-pro"] = "sora-2",
+    seconds: Literal["4", "8", "12"] = "4",
+    size: Literal["720x1280", "1280x720"] = "720x1280",
+) -> None:
+    context = await create_command_context(
+        interaction, params={"prompt": video_prompt, "video_model": video_model, "seconds": seconds}
+    )
+
+    await interaction.response.defer()
+
+    if interaction.user.id != 222869237012758529:
+        await interaction.followup.send("Only Zach can use this command.")
+        return
+
+    openai_client = await get_openai_client(guild_id=0)
+
+    video_object = await openai_client.videos.create_and_poll(
+        model=video_model, prompt=video_prompt, seconds=seconds, size=size
+    )
+
+    if video_object.status == "completed":
+        content = await openai_client.videos.download_content(video_object.id, variant="video")
+        file_name = f"{video_model}-{video_object.id}.mp4"
+        path = content_path(context=context, file_name=file_name)
+        content.write_to_file(path)
+
+        # create our embed object
+        embed = Embed(
+            color=3426654,
+            title=f"`{video_model}` Video Generation",
+            description=f"### User Input:\n> {video_prompt}",
+        )
+
+        # attach our file object
+        file_upload = discord.File(fp=path, filename=file_name)
+        await interaction.followup.send(embed=embed, file=file_upload)
+    else:
+        await interaction.followup.send(f"Video ID, `{video_object.id}`, failed to be generated.")
 
     return await context.save()
 
