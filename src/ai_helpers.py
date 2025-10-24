@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
-from db_utils import CommandContext, get_api_key, get_response_id, update_chat
+from src.db_utils import CommandContext, get_api_key, get_response_id, update_chat
 
 
 def get_config():
@@ -18,7 +18,7 @@ def get_config():
     Read the configuration specified in the config ini
     """
     config = ConfigParser()
-    config.read("config.ini")
+    config.read("../config.ini")
     return config
 
 
