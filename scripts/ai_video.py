@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -7,9 +8,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from api_keys import api_keys
-
-API_KEY = api_keys["B4NG AI"]
+API_KEY = os.environ["OPENAI_API_KEY"]
 MODEL = "sora-2"
 DEFAULT_PROMPT = "A video of a cat on a motorcycle"
 DEFAULT_SECONDS = 4

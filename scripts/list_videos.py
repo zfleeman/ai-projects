@@ -1,12 +1,11 @@
 import csv
+import os
 from datetime import datetime
 
 import pytz
 from openai import OpenAI
 
-from scripts.api_keys import api_keys
-
-API_KEY = api_keys["B4NG AI"]
+API_KEY = os.environ["OPENAI_API_KEY"]
 
 client = OpenAI(api_key=API_KEY)
 
