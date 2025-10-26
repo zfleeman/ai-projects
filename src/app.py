@@ -16,7 +16,7 @@ from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
 from openai import BadRequestError
 from openai.types import Image, ImagesResponse
 
-from src.ai_helpers import (
+from ai_helpers import (
     check_model_limit,
     content_path,
     generate_speech,
@@ -25,7 +25,7 @@ from src.ai_helpers import (
     new_response,
     speak_and_spell,
 )
-from src.db_utils import create_command_context
+from db_utils import create_command_context
 
 # Bot Client
 intents = Intents.default()

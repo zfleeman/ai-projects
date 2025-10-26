@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
-from src.db_utils import CommandContext, get_api_key, get_response_id, update_chat
+from db_utils import CommandContext, get_api_key, get_response_id, update_chat
 
 
 def get_config():
