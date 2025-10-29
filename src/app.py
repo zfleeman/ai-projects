@@ -283,16 +283,19 @@ async def image(
     video_model="The OpenAI video model to use.",
     seconds="Total duration in seconds.",
     size="The video's output resolution.",
+    ai_director="Punch-up your prompt with keywords and information important to the video model.",
 )
 async def video(
     interaction: Interaction,
     video_prompt: str,
     video_model: Literal["sora-2", "sora-2-pro"] = "sora-2",
     seconds: Literal["4", "8", "12"] = "4",
-    size: Literal["720x1280", "1280x720"] = "720x1280",
+    size: Literal["720x1280", "1280x720"] = "1280x720",
+    ai_director: bool = False,
 ) -> None:
     context = await create_command_context(
-        interaction, params={"prompt": video_prompt, "video_model": video_model, "seconds": seconds}
+        interaction,
+        params={"prompt": video_prompt, "video_model": video_model, "seconds": seconds},
     )
 
     await interaction.response.defer()
@@ -301,7 +304,15 @@ async def video(
         await interaction.followup.send("Only Zach can use this command.")
         return
 
+    config = get_config()
+    original_prompt = video_prompt
+
     openai_client = await get_openai_client(guild_id=0)
+
+    if ai_director:
+        instructions = config.get("OPENAI_INSTRUCTIONS", "video").format(seconds=seconds)
+        response = await new_response(context=context, instructions=instructions, prompt=video_prompt)
+        video_prompt = response.output_text
 
     video_object = await openai_client.videos.create_and_poll(
         model=video_model, prompt=video_prompt, seconds=seconds, size=size
@@ -313,11 +324,19 @@ async def video(
         path = content_path(context=context, file_name=file_name)
         content.write_to_file(path)
 
+        # format the video prompt for a nice text display in the output message
+        if ai_director:
+            description_text = (
+                f"### User Input:\n> {original_prompt}\n" f"### AI Director Revision:\n```{response.output_text}```"
+            )
+        else:
+            description_text = f"### User Input:\n> {video_prompt}"
+
         # create our embed object
         embed = Embed(
             color=3426654,
             title=f"`{video_model}` Video Generation",
-            description=f"### User Input:\n> {video_prompt}",
+            description=description_text,
         )
 
         # attach our file object
@@ -409,7 +428,7 @@ async def chat(
     interaction: Interaction,
     chat_prompt: str,
     keep_chatting: Literal["Yes", "No"] = "No",
-    chat_model: Literal["gpt-5-mini", "gpt-5", "gpt-4.1"] = "gpt-5-mini",
+    chat_model: Literal["gpt-5-mini", "gpt-5", "gpt-4.1", "gpt-4.1-mini"] = "gpt-4.1-mini",
     custom_instructions: Optional[str] = None,
 ) -> None:
 
@@ -435,7 +454,9 @@ async def chat(
     await interaction.response.defer()
 
     try:
-        response = await new_response(context=context, prompt=chat_prompt, model=chat_model)
+        response = await new_response(
+            context=context, prompt=chat_prompt, instructions=custom_instructions, model=chat_model
+        )
     except BadRequestError:
         await interaction.followup.send(
             f"Your prompt:\n> {chat_prompt}\nProbably violated OpenAI's content policies. Clean up your act."
