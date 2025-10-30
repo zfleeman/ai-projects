@@ -1,0 +1,36 @@
+## Ignore all
+**
+
+
+# Except
+# root
+!/.gitignore
+!/README.md
+
+!/openai-discord-bot/
+!/openai-discord-bot/**
+
+# Additional ignores
+/openai-discord-bot/generated_content/
+/openai-discord-bot/database.db
+/openai-discord-bot/encrypted_api_keys.txt
+
+# Always ignore Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
