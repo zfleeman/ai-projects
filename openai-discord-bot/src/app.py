@@ -9,12 +9,16 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional
-from urllib.request import Request, urlopen
 
 import discord
+from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
+from openai import BadRequestError
+from openai.types import Image, ImagesResponse
+
 from ai_helpers import (
     check_model_limit,
     content_path,
+    download_file_from_url,
     generate_speech,
     get_config,
     get_openai_client,
@@ -22,9 +26,6 @@ from ai_helpers import (
     speak_and_spell,
 )
 from db_utils import create_command_context
-from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
-from openai import BadRequestError
-from openai.types import Image, ImagesResponse
 
 # Bot Client
 intents = Intents.default()
@@ -279,7 +280,8 @@ async def image(
 @tree.command(name="video", description="Generate a video using a prompt.")
 @app_commands.describe(
     video_prompt="The prompt used for video generation.",
-    video_model="The OpenAI video model to use.",
+    model="The OpenAI video model to use.",
+    image_reference="Upload a reference image for the model to work with.",
     seconds="Total duration in seconds.",
     size="The video's output resolution.",
     ai_director="Punch-up your prompt with keywords and information important to the video model.",
@@ -287,14 +289,15 @@ async def image(
 async def video(
     interaction: Interaction,
     video_prompt: str,
-    video_model: Literal["sora-2", "sora-2-pro"] = "sora-2",
+    image_reference: Optional[discord.Attachment] = None,
+    model: Literal["sora-2", "sora-2-pro"] = "sora-2",
     seconds: Literal["4", "8", "12"] = "4",
     size: Literal["720x1280", "1280x720"] = "1280x720",
-    ai_director: bool = False,
+    ai_director: bool = True,
 ) -> None:
     context = await create_command_context(
         interaction,
-        params={"prompt": video_prompt, "video_model": video_model, "seconds": seconds},
+        params={"prompt": video_prompt, "model": model, "seconds": seconds, "size": size},
     )
 
     await interaction.response.defer()
@@ -305,43 +308,79 @@ async def video(
 
     config = get_config()
     original_prompt = video_prompt
+    description_text = f"### User Input:\n> {original_prompt}"
 
     openai_client = await get_openai_client(guild_id=0)
+
+    if image_reference:
+        # Download the image using the generic function
+        download_file_from_url(
+            url=image_reference.url,
+            filename=image_reference.filename,
+            headers={"User-Agent": USER_AGENT},
+        )
+        input_reference_path = image_reference.filename
+
+        # Open the file, read its contents, and store as bytes (to avoid closed file issues)
+        with open(input_reference_path, "rb") as input_reference:
+            context.params["input_reference"] = (image_reference.filename, input_reference.read())
 
     if ai_director:
         instructions = config.get("OPENAI_INSTRUCTIONS", "video").format(seconds=seconds)
         response = await new_response(context=context, instructions=instructions, prompt=video_prompt)
         video_prompt = response.output_text
-        text_path = content_path(context=context, file_name=f"{response.id}.txt")
+        description_text += "\n### AI Director:\n`True`"
 
-        with open(text_path, "w", encoding="UTF-8") as f:
-            f.write(response.output_text)
-
-    video_object = await openai_client.videos.create_and_poll(
-        model=video_model, prompt=video_prompt, seconds=seconds, size=size
-    )
+    video_object = await openai_client.videos.create_and_poll(**context.params)
 
     if video_object.status == "completed":
         content = await openai_client.videos.download_content(video_object.id, variant="video")
-        file_name = f"{video_model}-{video_object.id}.mp4"
-        path = content_path(context=context, file_name=file_name)
-        content.write_to_file(path)
+        video_file_name = f"{model}-{video_object.id}.mp4"
+        video_path = content_path(context=context, file_name=video_file_name)
+        content.write_to_file(video_path)
 
-        description_text = f"### User Input:\n> {original_prompt}"
+        files = []
+        files.append(discord.File(fp=video_path, filename=video_file_name))
+
+        if ai_director:
+            text_file_name = f"{model}-ai-director-prompt-{video_object.id}.txt"
+            text_path = content_path(context=context, file_name=text_file_name)
+
+            with open(text_path, "w", encoding="UTF-8") as f:
+                f.write(response.output_text)
+
+            files.append(discord.File(fp=text_path, filename=text_file_name))
 
         # create our embed object
         embed = Embed(
             color=3426654,
-            title=f"`{video_model}` Video Generation",
+            title=f"`{model}` Video Generation",
             description=description_text,
         )
 
-        # attach our file object
-        file_upload = discord.File(fp=path, filename=file_name)
-        await interaction.followup.send(embed=embed, file=file_upload)
-    else:
-        await interaction.followup.send(f"Video ID, `{video_object.id}`, failed to be generated.")
+        if image_reference:
+            embed.set_image(url=f"attachment://{image_reference.filename}")
+            # Only attach the file if it still exists (avoid I/O on closed file)
+            if Path(image_reference.filename).exists():
+                files.append(discord.File(fp=image_reference.filename, filename=image_reference.filename))
+                # delete downloaded file after sending
+                embed.set_footer(text="Used image for reference.")
 
+        # attach our files object
+        await interaction.followup.send(embed=embed, files=files)
+        # Now safe to delete the file
+        if image_reference and Path(image_reference.filename).exists():
+            Path(image_reference.filename).unlink()
+    else:
+        await interaction.followup.send(
+            content=(
+                f"Video ID, `{video_object.id}`, failed to be generated.\n"
+                "Be sure to follow the guidelines and restrictions for video models: "
+                "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions"
+            )
+        )
+
+    context.params["ai_director"] = ai_director
     return await context.save()
 
 
@@ -391,16 +430,12 @@ async def vision(interaction: Interaction, attachment: discord.Attachment, visio
         description=f"User Input:\n```{vision_prompt}```",
     )
 
-    req = Request(
+    # Download the image using the generic function
+    download_file_from_url(
         url=attachment.url,
+        filename=attachment.filename,
         headers={"User-Agent": USER_AGENT},
     )
-
-    # Download the image from the URL
-    with urlopen(req) as img_response:
-        image_data = img_response.read()
-        with open(attachment.filename, "wb") as file:
-            file.write(image_data)
 
     discord_file = discord.File(fp=attachment.filename, filename=attachment.filename)
 

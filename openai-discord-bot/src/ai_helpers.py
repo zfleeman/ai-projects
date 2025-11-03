@@ -6,6 +6,7 @@ from configparser import ConfigParser
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
+from urllib.request import Request, urlopen
 
 from openai import AsyncOpenAI
 from openai.types.responses import Response
@@ -20,6 +21,19 @@ def get_config():
     config = ConfigParser()
     config.read("config.ini")
     return config
+
+
+def download_file_from_url(url: str, filename: str, headers: dict = None) -> None:
+    """
+    Downloads a file from the given URL and saves it to the specified filename.
+    Optionally accepts headers for the request.
+    """
+
+    req = Request(url=url, headers=headers or {})
+    with urlopen(req) as response:
+        data = response.read()
+        with open(filename, "wb") as f:
+            f.write(data)
 
 
 async def get_openai_client(guild_id: int) -> AsyncOpenAI:
