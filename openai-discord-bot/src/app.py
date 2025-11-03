@@ -12,10 +12,6 @@ from typing import Literal, Optional
 from urllib.request import Request, urlopen
 
 import discord
-from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
-from openai import BadRequestError
-from openai.types import Image, ImagesResponse
-
 from ai_helpers import (
     check_model_limit,
     content_path,
@@ -26,6 +22,9 @@ from ai_helpers import (
     speak_and_spell,
 )
 from db_utils import create_command_context
+from discord import Embed, FFmpegOpusAudio, Intents, Interaction, app_commands
+from openai import BadRequestError
+from openai.types import Image, ImagesResponse
 
 # Bot Client
 intents = Intents.default()
@@ -313,6 +312,10 @@ async def video(
         instructions = config.get("OPENAI_INSTRUCTIONS", "video").format(seconds=seconds)
         response = await new_response(context=context, instructions=instructions, prompt=video_prompt)
         video_prompt = response.output_text
+        text_path = content_path(context=context, file_name=f"{response.id}.txt")
+
+        with open(text_path, "w", encoding="UTF-8") as f:
+            f.write(response.output_text)
 
     video_object = await openai_client.videos.create_and_poll(
         model=video_model, prompt=video_prompt, seconds=seconds, size=size
@@ -324,13 +327,7 @@ async def video(
         path = content_path(context=context, file_name=file_name)
         content.write_to_file(path)
 
-        # format the video prompt for a nice text display in the output message
-        if ai_director:
-            description_text = (
-                f"### User Input:\n> {original_prompt}\n" f"### AI Director Revision:\n```{response.output_text}```"
-            )
-        else:
-            description_text = f"### User Input:\n> {video_prompt}"
+        description_text = f"### User Input:\n> {original_prompt}"
 
         # create our embed object
         embed = Embed(
