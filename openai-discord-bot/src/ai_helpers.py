@@ -6,6 +6,7 @@ from configparser import ConfigParser
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
+from urllib.request import Request, urlopen
 
 from openai import AsyncOpenAI
 from openai.types.responses import Response
@@ -22,6 +23,19 @@ def get_config():
     return config
 
 
+def download_file_from_url(url: str, filename: str, headers: dict = None) -> None:
+    """
+    Downloads a file from the given URL and saves it to the specified filename.
+    Optionally accepts headers for the request.
+    """
+
+    req = Request(url=url, headers=headers or {})
+    with urlopen(req) as response:
+        data = response.read()
+        with open(filename, "wb") as f:
+            f.write(data)
+
+
 async def get_openai_client(guild_id: int) -> AsyncOpenAI:
     """
     Return the guild-assigned API key
@@ -35,22 +49,18 @@ async def get_openai_client(guild_id: int) -> AsyncOpenAI:
 async def new_response(
     context: CommandContext,
     prompt: str,
+    instructions: Optional[str] = None,
     openai_client: Optional[AsyncOpenAI] = None,
-    model: str = "gpt-5-mini",
+    max_output_tokens: int = 1000,
+    model: str = "gpt-4.1-mini",
 ) -> Response:
     """
     Generate a new response with the OpenAI Response API and store its ID
     """
-    config = get_config()
 
     # topic-specific models
     if context.params.get("topic") == "talk_quotes":
         model = "gpt-4o"
-
-    # use command-specified custom instructions --> for future commands
-    instructions = context.params.get("custom_instructions") or config.get(
-        "OPENAI_INSTRUCTIONS", context.params.get("topic")
-    )
 
     if not openai_client:
         openai_client = await get_openai_client(guild_id=context.guild_id)
@@ -61,10 +71,12 @@ async def new_response(
         input=prompt,
         model=model,
         instructions=instructions,
+        max_output_tokens=max_output_tokens,
         previous_response_id=previous_response_id,
     )
 
-    await update_chat(response_id=response.id, context=context)
+    if context.params.get("topic"):
+        await update_chat(response_id=response.id, context=context)
 
     return response
 
@@ -103,9 +115,16 @@ async def speak_and_spell(
     """
     Create a new response and WAV file in one nice function.
     """
+
+    config = get_config()
+
     openai_client = await get_openai_client(guild_id=context.guild_id)
 
-    response = await new_response(context=context, prompt=prompt, openai_client=openai_client)
+    instructions = config.get("OPENAI_INSTRUCTIONS", context.params.get("topic"))
+
+    response = await new_response(
+        context=context, prompt=prompt, instructions=instructions, openai_client=openai_client
+    )
 
     tts = response.output_text
 
