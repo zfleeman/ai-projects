@@ -333,60 +333,66 @@ async def video(
 
     video_object = await openai_client.videos.create_and_poll(**context.params)
 
-    if video_object.status == "completed":
-        content = await openai_client.videos.download_content(video_object.id, variant="video")
-        video_file_name = f"{model}-{video_object.id}.mp4"
-        video_path = content_path(context=context, file_name=video_file_name)
-        content.write_to_file(video_path)
+    try:
+        # successful generation
+        if video_object.status == "completed":
+            content = await openai_client.videos.download_content(video_object.id, variant="video")
+            video_file_name = f"{model}-{video_object.id}.mp4"
+            video_path = content_path(context=context, file_name=video_file_name)
+            content.write_to_file(video_path)
 
-        files = []
-        files.append(discord.File(fp=video_path, filename=video_file_name))
+            files = []
+            files.append(discord.File(fp=video_path, filename=video_file_name))
 
-        if ai_director:
-            text_file_name = f"{model}-ai-director-prompt-{video_object.id}.txt"
-            text_path = content_path(context=context, file_name=text_file_name)
+            if ai_director:
+                text_file_name = f"{model}-ai-director-prompt-{video_object.id}.txt"
+                text_path = content_path(context=context, file_name=text_file_name)
 
-            with open(text_path, "w", encoding="UTF-8") as f:
-                f.write(response.output_text)
+                with open(text_path, "w", encoding="UTF-8") as f:
+                    f.write(response.output_text)
 
-            files.append(discord.File(fp=text_path, filename=text_file_name))
+                files.append(discord.File(fp=text_path, filename=text_file_name))
 
-        # create our embed object
-        embed = Embed(
-            color=3426654,
-            title=f"`{model}` Video Generation",
-            description=description_text,
-        )
+            # create our embed object
+            embed = Embed(
+                color=3426654,
+                title=f"`{model}` Video Generation",
+                description=description_text,
+            )
 
-        if image_reference:
-            embed.set_image(url=f"attachment://{image_reference.filename}")
-            # Only attach the file if it still exists (avoid I/O on closed file)
-            if Path(image_reference.filename).exists():
-                files.append(discord.File(fp=image_reference.filename, filename=image_reference.filename))
-                # delete downloaded file after sending
-                embed.set_footer(text="Used image for reference.")
+            if image_reference:
+                embed.set_image(url=f"attachment://{image_reference.filename}")
+                # Only attach the file if it still exists (avoid I/O on closed file)
+                if Path(image_reference.filename).exists():
+                    files.append(discord.File(fp=image_reference.filename, filename=image_reference.filename))
+                    # delete downloaded file after sending
+                    embed.set_footer(text="Used image for reference.")
 
-        # attach our files object
-        await interaction.followup.send(embed=embed, files=files)
-        # Now safe to delete the file
+            # attach our files object
+            await interaction.followup.send(embed=embed, files=files)
+
+        # unsuccessful generation
+        else:
+            await interaction.followup.send(
+                content=(
+                    f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
+                    f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
+                    "Guidelines and restrictions for video models: "
+                    "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions"
+                )
+            )
+
+            # write text file with a failed name
+            if ai_director:
+                text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
+                text_path = content_path(context=context, file_name=text_file_name)
+
+                with open(text_path, "w", encoding="UTF-8") as f:
+                    f.write(response.output_text)
+    finally:
+        # delete the image reference file if it exists
         if image_reference and Path(image_reference.filename).exists():
             Path(image_reference.filename).unlink()
-    else:
-        await interaction.followup.send(
-            content=(
-                f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
-                f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
-                "Guidelines and restrictions for video models: "
-                "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions"
-            )
-        )
-
-        if ai_director:
-            text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
-            text_path = content_path(context=context, file_name=text_file_name)
-
-            with open(text_path, "w", encoding="UTF-8") as f:
-                f.write(response.output_text)
 
     context.params["ai_director"] = ai_director
     return await context.save()
