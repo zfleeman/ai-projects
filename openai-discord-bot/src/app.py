@@ -328,7 +328,7 @@ async def video(
     if ai_director:
         instructions = config.get("OPENAI_INSTRUCTIONS", "video").format(seconds=seconds)
         response = await new_response(context=context, instructions=instructions, prompt=video_prompt)
-        video_prompt = response.output_text
+        context.params["prompt"] = response.output_text
         description_text += "\n### AI Director:\n`True`"
 
     video_object = await openai_client.videos.create_and_poll(**context.params)
@@ -374,11 +374,19 @@ async def video(
     else:
         await interaction.followup.send(
             content=(
-                f"Video ID, `{video_object.id}`, failed to be generated.\n"
-                "Be sure to follow the guidelines and restrictions for video models: "
+                f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
+                f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
+                "Guidelines and restrictions for video models: "
                 "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions"
             )
         )
+
+        if ai_director:
+            text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
+            text_path = content_path(context=context, file_name=text_file_name)
+
+            with open(text_path, "w", encoding="UTF-8") as f:
+                f.write(response.output_text)
 
     context.params["ai_director"] = ai_director
     return await context.save()
