@@ -373,15 +373,15 @@ async def video(
 
         # unsuccessful generation
         else:
-            await interaction.followup.send(
-                content=(
+            failure_followup = {
+                "content": (
                     f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
                     f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
                     "Guidelines and restrictions for video models: "
-                    "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions"
+                    "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions\n\n"
+                    f"User Prompt:\n> {video_prompt}"
                 )
-            )
-
+            }
             # write text file with a failed name
             if ai_director:
                 text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
@@ -389,6 +389,14 @@ async def video(
 
                 with open(text_path, "w", encoding="UTF-8") as f:
                     f.write(response.output_text)
+
+                failure_followup["file"] = discord.File(fp=text_path, filename=text_file_name)
+                failure_followup[
+                    "content"
+                ] += "\nPrompt rewritten with the AI Director. See this message's attached text file."
+
+            await interaction.followup.send(**failure_followup)
+
     finally:
         # delete the image reference file if it exists
         if image_reference and Path(image_reference.filename).exists():
