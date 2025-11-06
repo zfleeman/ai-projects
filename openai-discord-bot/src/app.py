@@ -22,10 +22,11 @@ from ai_helpers import (
     generate_speech,
     get_config,
     get_openai_client,
+    has_enough_credits,
     new_response,
     speak_and_spell,
 )
-from db_utils import create_command_context
+from db_utils import add_credits, create_command_context, get_user_credits
 
 # Bot Client
 intents = Intents.default()
@@ -302,11 +303,23 @@ async def video(
 
     await interaction.response.defer()
 
-    if interaction.user.id != 222869237012758529:
-        await interaction.followup.send("Only Zach can use this command.")
+    config = get_config()
+
+    # credits section
+    user_credits = await get_user_credits(user_id=interaction.user.id)
+    model_cost = int(config.get("OPENAI_CREDITS", model))
+    deduction = model_cost * int(seconds)
+
+    if not has_enough_credits(user_credits=user_credits, deduction=deduction):
+        await interaction.followup.send(
+            content=(
+                f"You do not have enough B4NG AI credits to run this command with `{model}`.\n"
+                f"You have: `{user_credits}` credits.\n"
+                f"This run costs you `{model_cost} (model cost) * {seconds} (seconds) = {deduction}` B4NG AI credits."
+            )
+        )
         return
 
-    config = get_config()
     original_prompt = video_prompt
     description_text = f"### User Input:\n> {original_prompt}"
 
@@ -366,7 +379,10 @@ async def video(
                 if Path(image_reference.filename).exists():
                     files.append(discord.File(fp=image_reference.filename, filename=image_reference.filename))
                     # delete downloaded file after sending
-                    embed.set_footer(text="Used image for reference.")
+
+            # charge usage on success
+            remaining_credits = await add_credits(user_id=interaction.user.id, num_credits=-deduction)
+            embed.set_footer(text=f"{interaction.user.name} has {remaining_credits} B4NG AI credits remaining.")
 
             # attach our files object
             await interaction.followup.send(embed=embed, files=files)
@@ -379,7 +395,8 @@ async def video(
                     f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
                     "Guidelines and restrictions for video models: "
                     "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions\n\n"
-                    f"User Prompt:\n> {video_prompt}"
+                    f"User Prompt:\n> {video_prompt}\n"
+                    "You were not charged B4NG AI credits for this failure."
                 )
             }
             # write text file with a failed name
@@ -521,6 +538,57 @@ async def chat(
     embed = Embed(title=title, description=response.output_text, color=1752220)
 
     await interaction.followup.send(content=f"> {chat_prompt}", embed=embed)
+
+    return await context.save()
+
+
+@tree.command(name="grant", description="Add credits to a user's Credits balance.")
+@app_commands.describe(user_id="The user's Discord ID.", num_credits="Number of credits to add (can be negative).")
+async def grant(interaction: Interaction, user_id: str, num_credits: str) -> None:
+    context = await create_command_context(interaction, params={"user_id": user_id, "credits": num_credits})
+
+    if interaction.user.id != 222869237012758529:
+        await interaction.followup.send("Only Zach can use this command.")
+        return
+
+    # add credits using the database helper
+    new_total = await add_credits(user_id=int(user_id), num_credits=int(num_credits))
+
+    await interaction.response.send_message(content=f"User <@{user_id}> now has {new_total} B4NG AI credits.")
+
+    return await context.save()
+
+
+@tree.command(name="balance", description="Displays your current B4NG AI credits.")
+async def balance(interaction: Interaction) -> None:
+    context = await create_command_context(interaction=interaction)
+
+    current_credits = await get_user_credits(user_id=interaction.user.id)
+
+    await interaction.response.send_message(content=f"{interaction.user.name} has {current_credits} B4NG AI credits.")
+
+    return await context.save()
+
+
+@tree.command(name="costs", description="Shows current model costs in B4NG AI credits.")
+async def costs(interaction: Interaction) -> None:
+    context = await create_command_context(interaction=interaction)
+
+    config = get_config()
+
+    # Loop through every entry in OPENAI_CREDITS section and build a string of key/value pairs
+    costs_list = []
+
+    for key, value in config.items("OPENAI_CREDITS"):
+        costs_list.append(f"- `{key}`: {value} credits")
+
+    costs_message = "\n".join(costs_list)
+
+    await interaction.response.send_message(
+        content=(
+            f"Model costs in B4NG AI credits:\n{costs_message}\n" "Note: video models are a 'per second' credit cost."
+        )
+    )
 
     return await context.save()
 

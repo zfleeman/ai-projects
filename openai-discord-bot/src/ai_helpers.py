@@ -36,6 +36,13 @@ def download_file_from_url(url: str, filename: str, headers: dict = None) -> Non
             f.write(data)
 
 
+def has_enough_credits(user_credits: int, deduction: int) -> bool:
+    """
+    Check to see if the user has enough credits to use the model
+    """
+    return user_credits - deduction > 0
+
+
 async def get_openai_client(guild_id: int) -> AsyncOpenAI:
     """
     Return the guild-assigned API key
