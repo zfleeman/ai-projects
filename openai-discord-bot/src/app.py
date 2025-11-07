@@ -16,7 +16,6 @@ from openai import BadRequestError
 from openai.types import Image, ImagesResponse
 
 from ai_helpers import (
-    check_model_limit,
     content_path,
     download_file_from_url,
     generate_speech,
@@ -41,7 +40,7 @@ usage_tracker = {}  # blank dict created to store model usage for restricted mod
 
 
 @tree.command(name="join", description="Join the voice channel that the user is currently in.")
-async def join(interaction: Interaction) -> None:
+async def join(interaction: Interaction) -> bool:
     context = await create_command_context(interaction)
 
     if interaction.user.voice:
@@ -54,7 +53,7 @@ async def join(interaction: Interaction) -> None:
 
 
 @tree.command(name="leave", description="Leave the voice channel that the bot is currently in.")
-async def leave(interaction: Interaction) -> None:
+async def leave(interaction: Interaction) -> bool:
     context = await create_command_context(interaction)
 
     if interaction.guild.voice_client:
@@ -66,14 +65,14 @@ async def leave(interaction: Interaction) -> None:
 
 @tree.command(name="clean", description="Delete messages sent by the bot within a specified timeframe.")
 @app_commands.describe(number_of_minutes="The number of minutes to look back for message deletion.")
-async def clean(interaction: Interaction, number_of_minutes: int) -> None:
+async def clean(interaction: Interaction, number_of_minutes: int) -> bool:
     context = await create_command_context(interaction, params={"number_of_minutes": number_of_minutes})
     config = get_config()
 
     max_clean_minutes = int(config.get("GENERAL", "max_clean_minutes", fallback=1440))
     if max_clean_minutes < number_of_minutes:
         await interaction.response.send_message(content=f"Can't clean more than {max_clean_minutes} minutes back.")
-        return
+        return await context.save()
 
     after_time = datetime.now() - timedelta(minutes=number_of_minutes)
     messages = interaction.channel.history(after=after_time)
@@ -95,7 +94,7 @@ async def clean(interaction: Interaction, number_of_minutes: int) -> None:
 @app_commands.describe(
     topic="The topic the bot will talk about.", wait_minutes="The interval in minutes between each message."
 )
-async def talk(interaction: Interaction, topic: Literal["nonsense", "quotes"], wait_minutes: float = 5.0) -> None:
+async def talk(interaction: Interaction, topic: Literal["nonsense", "quotes"], wait_minutes: float = 5.0) -> bool:
     context = await create_command_context(interaction, params={"topic": f"talk_{topic}", "wait_minutes": wait_minutes})
     interval = wait_minutes * 60
 
@@ -104,7 +103,7 @@ async def talk(interaction: Interaction, topic: Literal["nonsense", "quotes"], w
 
     if not discord.utils.get(bot.voice_clients, guild=interaction.guild):
         await interaction.response.send_message(content="I must be in a voice channel before you use this command.")
-        return
+        return await context.save()
 
     await interaction.response.send_message(content="Starting talk loop.", delete_after=3.0)
 
@@ -133,7 +132,7 @@ async def talk(interaction: Interaction, topic: Literal["nonsense", "quotes"], w
 
 @tree.command(name="rather", description="Play a 'Would You Rather' game with a specified topic.")
 @app_commands.describe(topic="The subject for the generated hypothetical question.")
-async def rather(interaction: Interaction, topic: Literal["normal", "adult", "games", "fitness"] = "normal") -> None:
+async def rather(interaction: Interaction, topic: Literal["normal", "adult", "games", "fitness"] = "normal") -> bool:
     context = await create_command_context(interaction, params={"topic": f"rather_{topic}"})
     config = get_config()
     topic = f"rather_{topic}"
@@ -165,7 +164,7 @@ async def say(
     interaction: Interaction,
     text_to_speech: str,
     voice: Literal["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"] = "onyx",
-) -> None:
+) -> bool:
     context = await create_command_context(interaction, params={"text_to_speech": text_to_speech, "voice": voice})
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
     file_name = f"{ts}.wav"
@@ -194,70 +193,66 @@ async def say(
 
 @tree.command(name="image", description="Generate an image using a prompt and a specified model.")
 @app_commands.describe(
-    image_prompt="The prompt used for image generation.",
-    image_model="The OpenAI image model to use.",
+    prompt="The prompt used for image generation.",
+    model="The OpenAI image model to use.",
     background="Allows to set transparency for the background of the generated image(s). gpt-image-1 only.",
 )
 async def image(
     interaction: Interaction,
-    image_prompt: str,
-    image_model: Literal["dall-e-2", "dall-e-3", "gpt-image-1", "gpt-image-1-mini"] = "gpt-image-1-mini",
+    prompt: str,
+    model: Literal["dall-e-2", "dall-e-3", "gpt-image-1", "gpt-image-1-mini"] = "gpt-image-1-mini",
     background: Literal["transparent", "opaque", "auto"] = "auto",
-) -> None:
+) -> bool:
     context = await create_command_context(
-        interaction, params={"prompt": image_prompt, "model": image_model, "background": background}
+        interaction, params={"prompt": prompt, "model": model, "background": background}
     )
     submission_params = context.params
 
     await interaction.response.defer()
+    config = get_config()
 
     openai_client = await get_openai_client(interaction.guild_id)
 
     # create our embed object
     embed = Embed(
         color=10181046,
-        title=f"`{image_model}` Image Generation",
-        description=f"### User Input:\n> {image_prompt}",
+        title=f"`{model}` Image Generation",
+        description=f"### User Input:\n> {prompt}",
     )
 
     # gpt-image-1 has some special use cases that don't apply to dall-e-2/3
-    if "gpt-image-1" not in image_model:
+    if "gpt-image-1" not in model:
         _ = submission_params.pop("background")
         submission_params["response_format"] = "b64_json"
     else:
-
-        if not check_model_limit(context=context, usage_tracker=usage_tracker):
-
-            await interaction.followup.send(
-                content=f"`{context.params['model']}` been used too much today. Try again tomorrow!"
-            )
-
-            return
-
+        # submission params update for moderation
         submission_params["moderation"] = "low"
 
-        # set a footer showing usage information for gpt-image-1 (not mini)
-        if image_model == "gpt-image-1":
-            embed.set_footer(
-                text=(
-                    f"Used {usage_tracker[interaction.guild_id][image_model]['count']} "
-                    f"out of {usage_tracker[interaction.guild_id][image_model]['limit']} "
-                    f"image generations with {image_model} today."
+        # credits section
+        user_credits = await get_user_credits(user_id=interaction.user.id)
+        model_cost = int(config.get("OPENAI_CREDITS", model, fallback="0"))
+
+        if not has_enough_credits(user_credits=user_credits, deduction=model_cost):
+            await interaction.followup.send(
+                content=(
+                    f"You do not have enough B4NG AI credits to run this command with `{model}`.\n"
+                    f"You have: `{user_credits}` credits.\n"
+                    f"This run costs you `{model_cost}` B4NG AI credits."
                 )
             )
-
+            return await context.save()
     try:
         image_response: ImagesResponse = await openai_client.images.generate(**submission_params)
     except BadRequestError:
         await interaction.followup.send(
-            f"Your prompt:\n> {image_prompt}\nProbably violated OpenAI's content policies. Clean up your act."
+            f"Your prompt:\n> {prompt}\nProbably violated OpenAI's content policies. Clean up your act."
         )
-        return
+        return await context.save()
 
     image_object: Image = image_response.data[0]
 
     # save the generated image to a file
-    file_name = f"{image_model}-{image_response.created}.png"
+    file_name = f"{model}-{image_response.created}.png"
     path = content_path(context=context, file_name=file_name)
     image_bytes = base64.b64decode(image_object.b64_json)
 
@@ -266,9 +261,12 @@ async def image(
 
     embed.set_image(url=f"attachment://{file_name}")
 
-    # set the footer text if this is dall-e-3
+    # set the footer based on model
     if image_object.revised_prompt:
         embed.set_footer(text=f"Revised Prompt:\n{image_object.revised_prompt}")
+    elif model == "gpt-image-1":
+        remaining_credits = await add_credits(user_id=interaction.user.id, num_credits=-model_cost)
+        embed.set_footer(text=f"{interaction.user.name} has {remaining_credits} B4NG AI credits remaining.")
 
     # attach our file object
     file_upload = discord.File(fp=path, filename=file_name)
@@ -295,7 +293,7 @@ async def video(
     seconds: Literal["4", "8", "12"] = "4",
     size: Literal["720x1280", "1280x720"] = "1280x720",
     ai_director: bool = True,
-) -> None:
+) -> bool:
     context = await create_command_context(
         interaction,
         params={"prompt": video_prompt, "model": model, "seconds": seconds, "size": size},
@@ -318,7 +316,7 @@ async def video(
                 f"This run costs you `{model_cost} (model cost) * {seconds} (seconds) = {deduction}` B4NG AI credits."
             )
         )
-        return
+        return await context.save()
 
     original_prompt = video_prompt
     description_text = f"### User Input:\n> {original_prompt}"
@@ -428,7 +426,7 @@ async def video(
     attachment="The image file you want to describe or interpret.",
     vision_prompt="The prompt to be used when describing the image.",
 )
-async def vision(interaction: Interaction, attachment: discord.Attachment, vision_prompt: str = "") -> None:
+async def vision(interaction: Interaction, attachment: discord.Attachment, vision_prompt: str = "") -> bool:
     context = await create_command_context(
         interaction, params={"vision_prompt": vision_prompt, "attachment": attachment.filename}
     )
@@ -443,7 +441,7 @@ async def vision(interaction: Interaction, attachment: discord.Attachment, visio
         await interaction.response.send_message(
             "```plaintext\nError: Unable to retrieve the image attachment. Did you attach an image?\n```"
         )
-        return
+        return await context.save()
 
     await interaction.response.defer()
 
@@ -501,7 +499,7 @@ async def chat(
     keep_chatting: Literal["Yes", "No"] = "No",
     chat_model: Literal["gpt-5-mini", "gpt-5", "gpt-4.1", "gpt-4.1-mini"] = "gpt-4.1-mini",
     custom_instructions: Optional[str] = None,
-) -> None:
+) -> bool:
 
     if not custom_instructions:
         config = get_config()
@@ -532,7 +530,7 @@ async def chat(
         await interaction.followup.send(
             f"Your prompt:\n> {chat_prompt}\nProbably violated OpenAI's content policies. Clean up your act."
         )
-        return
+        return await context.save()
 
     title = f"🤖 `{chat_model}` Response{' (Continued)' if response.previous_response_id else ''}"
     embed = Embed(title=title, description=response.output_text, color=1752220)
@@ -544,12 +542,12 @@ async def chat(
 
 @tree.command(name="grant", description="Add credits to a user's Credits balance.")
 @app_commands.describe(user_id="The user's Discord ID.", num_credits="Number of credits to add (can be negative).")
-async def grant(interaction: Interaction, user_id: str, num_credits: str) -> None:
+async def grant(interaction: Interaction, user_id: str, num_credits: str) -> bool:
     context = await create_command_context(interaction, params={"user_id": user_id, "credits": num_credits})
 
     if interaction.user.id != 222869237012758529:
         await interaction.followup.send("Only Zach can use this command.")
-        return
+        return await context.save()
 
     # add credits using the database helper
     new_total = await add_credits(user_id=int(user_id), num_credits=int(num_credits))
@@ -560,7 +558,7 @@ async def grant(interaction: Interaction, user_id: str, num_credits: str) -> Non
 
 
 @tree.command(name="balance", description="Displays your current B4NG AI credits.")
-async def balance(interaction: Interaction) -> None:
+async def balance(interaction: Interaction) -> bool:
     context = await create_command_context(interaction=interaction)
 
     current_credits = await get_user_credits(user_id=interaction.user.id)
@@ -571,7 +569,7 @@ async def balance(interaction: Interaction) -> None:
 
 
 @tree.command(name="costs", description="Shows current model costs in B4NG AI credits.")
-async def costs(interaction: Interaction) -> None:
+async def costs(interaction: Interaction) -> bool:
     context = await create_command_context(interaction=interaction)
 
     config = get_config()
