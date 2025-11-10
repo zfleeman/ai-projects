@@ -280,7 +280,6 @@ async def image(
 @app_commands.describe(
     video_prompt="The prompt used for video generation.",
     model="The OpenAI video model to use.",
-    image_reference="Upload a reference image for the model to work with.",
     seconds="Total duration in seconds.",
     size="The video's output resolution.",
     ai_director="Punch-up your prompt with keywords and information important to the video model.",
@@ -288,7 +287,6 @@ async def image(
 async def video(
     interaction: Interaction,
     video_prompt: str,
-    image_reference: Optional[discord.Attachment] = None,
     model: Literal["sora-2", "sora-2-pro"] = "sora-2",
     seconds: Literal["4", "8", "12"] = "4",
     size: Literal["720x1280", "1280x720"] = "1280x720",
@@ -323,19 +321,6 @@ async def video(
 
     openai_client = await get_openai_client(guild_id=0)
 
-    if image_reference:
-        # Download the image using the generic function
-        download_file_from_url(
-            url=image_reference.url,
-            filename=image_reference.filename,
-            headers={"User-Agent": USER_AGENT},
-        )
-        input_reference_path = image_reference.filename
-
-        # Open the file, read its contents, and store as bytes (to avoid closed file issues)
-        with open(input_reference_path, "rb") as input_reference:
-            context.params["input_reference"] = (image_reference.filename, input_reference.read())
-
     if ai_director:
         instructions = config.get("OPENAI_INSTRUCTIONS", "video").format(seconds=seconds)
         response = await new_response(context=context, instructions=instructions, prompt=video_prompt)
@@ -344,78 +329,66 @@ async def video(
 
     video_object = await openai_client.videos.create_and_poll(**context.params)
 
-    try:
-        # successful generation
-        if video_object.status == "completed":
-            content = await openai_client.videos.download_content(video_object.id, variant="video")
-            video_file_name = f"{model}-{video_object.id}.mp4"
-            video_path = content_path(context=context, file_name=video_file_name)
-            content.write_to_file(video_path)
+    # successful generation
+    if video_object.status == "completed":
+        content = await openai_client.videos.download_content(video_object.id, variant="video")
+        video_file_name = f"{model}-{video_object.id}.mp4"
+        video_path = content_path(context=context, file_name=video_file_name)
+        content.write_to_file(video_path)
 
-            files = []
-            files.append(discord.File(fp=video_path, filename=video_file_name))
+        files = []
+        files.append(discord.File(fp=video_path, filename=video_file_name))
 
-            if ai_director:
-                text_file_name = f"{model}-ai-director-prompt-{video_object.id}.txt"
-                text_path = content_path(context=context, file_name=text_file_name)
+        if ai_director:
+            text_file_name = f"{model}-ai-director-prompt-{video_object.id}.txt"
+            text_path = content_path(context=context, file_name=text_file_name)
 
-                with open(text_path, "w", encoding="UTF-8") as f:
-                    f.write(response.output_text)
+            with open(text_path, "w", encoding="UTF-8") as f:
+                f.write(response.output_text)
 
-                files.append(discord.File(fp=text_path, filename=text_file_name))
+            files.append(discord.File(fp=text_path, filename=text_file_name))
 
-            # create our embed object
-            embed = Embed(
-                color=3426654,
-                title=f"`{model}` Video Generation",
-                description=description_text,
+        # create our embed object
+        embed = Embed(
+            color=3426654,
+            title=f"`{model}` Video Generation",
+            description=description_text,
+        )
+
+        # charge usage on success
+        remaining_credits = await add_credits(user_id=interaction.user.id, num_credits=-deduction)
+        embed.set_footer(text=f"{interaction.user.name} has {remaining_credits} B4NG AI credits remaining.")
+
+        # attach our files object
+        await interaction.followup.send(embed=embed, files=files)
+
+    # unsuccessful generation
+    else:
+        failure_followup = {
+            "content": (
+                f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
+                f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
+                "Guidelines and restrictions for video models: "
+                "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions\n\n"
+                f"User Prompt:\n> {video_prompt}\n"
             )
+        }
+        # write text file with a failed name
+        if ai_director:
+            text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
+            text_path = content_path(context=context, file_name=text_file_name)
 
-            if image_reference:
-                embed.set_image(url=f"attachment://{image_reference.filename}")
-                # Only attach the file if it still exists (avoid I/O on closed file)
-                if Path(image_reference.filename).exists():
-                    files.append(discord.File(fp=image_reference.filename, filename=image_reference.filename))
-                    # delete downloaded file after sending
+            with open(text_path, "w", encoding="UTF-8") as f:
+                f.write(response.output_text)
 
-            # charge usage on success
-            remaining_credits = await add_credits(user_id=interaction.user.id, num_credits=-deduction)
-            embed.set_footer(text=f"{interaction.user.name} has {remaining_credits} B4NG AI credits remaining.")
+            failure_followup["file"] = discord.File(fp=text_path, filename=text_file_name)
+            failure_followup[
+                "content"
+            ] += "\nPrompt was rewritten with the AI Director. See this message's attached text file."
 
-            # attach our files object
-            await interaction.followup.send(embed=embed, files=files)
+        failure_followup["content"] += "\n**You were not charged B4NG AI credits for this failure.**"
 
-        # unsuccessful generation
-        else:
-            failure_followup = {
-                "content": (
-                    f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
-                    f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
-                    "Guidelines and restrictions for video models: "
-                    "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions\n\n"
-                    f"User Prompt:\n> {video_prompt}\n"
-                    "You were not charged B4NG AI credits for this failure."
-                )
-            }
-            # write text file with a failed name
-            if ai_director:
-                text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
-                text_path = content_path(context=context, file_name=text_file_name)
-
-                with open(text_path, "w", encoding="UTF-8") as f:
-                    f.write(response.output_text)
-
-                failure_followup["file"] = discord.File(fp=text_path, filename=text_file_name)
-                failure_followup[
-                    "content"
-                ] += "\nPrompt rewritten with the AI Director. See this message's attached text file."
-
-            await interaction.followup.send(**failure_followup)
-
-    finally:
-        # delete the image reference file if it exists
-        if image_reference and Path(image_reference.filename).exists():
-            Path(image_reference.filename).unlink()
+        await interaction.followup.send(**failure_followup)
 
     context.params["ai_director"] = ai_director
     return await context.save()
