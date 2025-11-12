@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from urllib.request import Request, urlopen
 
+from discord import Embed
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
@@ -41,6 +42,26 @@ def has_enough_credits(user_credits: int, deduction: int) -> bool:
     Check to see if the user has enough credits to use the model
     """
     return user_credits - deduction >= 0
+
+
+def construct_error_embed(
+    context: CommandContext, user_input: Optional[str] = "", fields: Optional[dict] = None
+) -> Embed:
+    description = ""
+
+    if user_input:
+        description += f"User Input:\n> {user_input}"
+
+    embed = Embed(title="B4NG AI Generation Error", color=15548997)
+    embed.add_field(name="User", value=f"<@{context.user_id}>")
+
+    if fields:
+        for field in fields:
+            embed.add_field(name=field, value=fields[field])
+
+    embed.description = description
+
+    return embed
 
 
 async def get_openai_client(guild_id: int) -> AsyncOpenAI:

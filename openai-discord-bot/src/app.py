@@ -16,6 +16,7 @@ from openai import BadRequestError
 from openai.types import Image, ImagesResponse
 
 from ai_helpers import (
+    construct_error_embed,
     content_path,
     download_file_from_url,
     generate_speech,
@@ -364,15 +365,23 @@ async def video(
 
     # unsuccessful generation
     else:
+        fields = {
+            "Video ID": video_object.id,
+            "Video Status": video_object.status,
+            "Error Type": video_object.error.code,
+            "Error Message": video_object.error.message,
+            "Guidelines URL": "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions",
+            "Charged Credits": "False",
+        }
+
         failure_followup = {
-            "content": (
-                f"Video ID, `{video_object.id}`, has status `{video_object.status}`.\n\n"
-                f"ERROR: `{video_object.error.code}`\nMESSAGE: `{video_object.error.message}`\n\n"
-                "Guidelines and restrictions for video models: "
-                "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions\n\n"
-                f"User Prompt:\n> {video_prompt}\n"
+            "embed": construct_error_embed(
+                context=context,
+                user_input=video_prompt,
+                fields=fields,
             )
         }
+
         # write text file with a failed name
         if ai_director:
             text_file_name = f"FAILED-{model}-ai-director-prompt-{video_object.id}.txt"
@@ -382,11 +391,6 @@ async def video(
                 f.write(response.output_text)
 
             failure_followup["file"] = discord.File(fp=text_path, filename=text_file_name)
-            failure_followup[
-                "content"
-            ] += "\nPrompt was rewritten with the AI Director. See this message's attached text file."
-
-        failure_followup["content"] += "\n**You were not charged B4NG AI credits for this failure.**"
 
         await interaction.followup.send(**failure_followup)
 
@@ -530,36 +534,26 @@ async def grant(interaction: Interaction, user_id: str, num_credits: str) -> boo
     return await context.save()
 
 
-@tree.command(name="balance", description="Displays your current B4NG AI credits.")
+@tree.command(name="balance", description="Displays your current B4NG AI credits and model costs.")
 async def balance(interaction: Interaction) -> bool:
     context = await create_command_context(interaction=interaction)
 
     current_credits = await get_user_credits(user_id=interaction.user.id)
-
-    await interaction.response.send_message(content=f"{interaction.user.name} has {current_credits} B4NG AI credits.")
-
-    return await context.save()
-
-
-@tree.command(name="costs", description="Shows current model costs in B4NG AI credits.")
-async def costs(interaction: Interaction) -> bool:
-    context = await create_command_context(interaction=interaction)
-
     config = get_config()
 
-    # Loop through every entry in OPENAI_CREDITS section and build a string of key/value pairs
+    # Build model costs list
     costs_list = []
-
     for key, value in config.items("OPENAI_CREDITS"):
         costs_list.append(f"- `{key}`: {value} credits")
-
     costs_message = "\n".join(costs_list)
 
-    await interaction.response.send_message(
-        content=(
-            f"Model costs in B4NG AI credits:\n{costs_message}\n" "Note: video models are a 'per second' credit cost."
-        )
+    message = (
+        f"{interaction.user.name} has {current_credits} B4NG AI credits.\n\n"
+        f"Model costs in B4NG AI credits:\n{costs_message}\n"
+        "Note: video models are a 'per second' credit cost."
     )
+
+    await interaction.response.send_message(content=message)
 
     return await context.save()
 
