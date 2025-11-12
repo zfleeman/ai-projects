@@ -244,10 +244,25 @@ async def image(
             return await context.save()
     try:
         image_response: ImagesResponse = await openai_client.images.generate(**submission_params)
-    except BadRequestError:
-        await interaction.followup.send(
-            f"Your prompt:\n> {prompt}\nProbably violated OpenAI's content policies. Clean up your act."
-        )
+    except BadRequestError as e:
+
+        failure_followup = {
+            "embed": construct_error_embed(
+                context=context,
+                user_input=prompt,
+                fields={
+                    "Error Code": f"`{e.body.get('code')}`",
+                    "Error Type": f"`{e.body.get('type')}`",
+                    "Error Message": e.body.get("message"),
+                    "Request ID": f"`{e.request_id}`",
+                    "Guidelines URL": ("https://openai.com/index/introducing-4o-image-generation#safety"),
+                    "Charged Credits": "False",
+                },
+            )
+        }
+
+        await interaction.followup.send(**failure_followup)
+
         return await context.save()
 
     image_object: Image = image_response.data[0]
@@ -279,23 +294,23 @@ async def image(
 
 @tree.command(name="video", description="Generate a video using a prompt.")
 @app_commands.describe(
-    video_prompt="The prompt used for video generation.",
-    model="The OpenAI video model to use.",
+    prompt="The prompt used for video generation.",
     seconds="Total duration in seconds.",
-    size="The video's output resolution.",
+    model="The OpenAI video model to use.",
     ai_director="Punch-up your prompt with keywords and information important to the video model.",
+    size="The video's output resolution.",
 )
 async def video(
     interaction: Interaction,
-    video_prompt: str,
-    model: Literal["sora-2", "sora-2-pro"] = "sora-2",
+    prompt: str,
     seconds: Literal["4", "8", "12"] = "4",
-    size: Literal["720x1280", "1280x720"] = "1280x720",
     ai_director: bool = True,
+    model: Literal["sora-2", "sora-2-pro"] = "sora-2",
+    size: Literal["720x1280", "1280x720"] = "1280x720",
 ) -> bool:
     context = await create_command_context(
         interaction,
-        params={"prompt": video_prompt, "model": model, "seconds": seconds, "size": size},
+        params={"prompt": prompt, "model": model, "seconds": seconds, "size": size},
     )
 
     await interaction.response.defer()
@@ -317,14 +332,14 @@ async def video(
         )
         return await context.save()
 
-    original_prompt = video_prompt
+    original_prompt = prompt
     description_text = f"### User Input:\n> {original_prompt}"
 
     openai_client = await get_openai_client(guild_id=0)
 
     if ai_director:
         instructions = config.get("OPENAI_INSTRUCTIONS", "video").format(seconds=seconds)
-        response = await new_response(context=context, instructions=instructions, prompt=video_prompt)
+        response = await new_response(context=context, instructions=instructions, prompt=prompt)
         context.params["prompt"] = response.output_text
         description_text += "\n### AI Director:\n`True`"
 
@@ -365,20 +380,20 @@ async def video(
 
     # unsuccessful generation
     else:
-        fields = {
-            "Video ID": video_object.id,
-            "Video Status": video_object.status,
-            "Error Type": video_object.error.code,
-            "Error Message": video_object.error.message,
-            "Guidelines URL": "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions",
-            "Charged Credits": "False",
-        }
-
         failure_followup = {
             "embed": construct_error_embed(
                 context=context,
-                user_input=video_prompt,
-                fields=fields,
+                user_input=prompt,
+                fields={
+                    "Error Type": f"`{video_object.error.code}`",
+                    "Error Message": video_object.error.message,
+                    "Video ID": f"`{video_object.id}`",
+                    "Video Status": f"`{video_object.status}`",
+                    "Guidelines URL": (
+                        "https://platform.openai.com/docs/guides/video-generation#guardrails-and-restrictions"
+                    ),
+                    "Charged Credits": "False",
+                },
             )
         }
 
@@ -395,6 +410,7 @@ async def video(
         await interaction.followup.send(**failure_followup)
 
     context.params["ai_director"] = ai_director
+    context.params["original_prompt"] = original_prompt
     return await context.save()
 
 
@@ -465,14 +481,14 @@ async def vision(interaction: Interaction, attachment: discord.Attachment, visio
 
 @tree.command(name="chat", description="Have a conversation with an OpenAI Chat Model, like you would with ChatGPT.")
 @app_commands.describe(
-    chat_prompt="The text of your question or statement that you wan the Chat Model to address.",
+    prompt="The text of your question or statement that you wan the Chat Model to address.",
     keep_chatting="Continue the conversation from your last prompt.",
     chat_model="The OpenAI Chat Model to use.",
     custom_instructions="Help the Chat Model respond to your prompt the way YOU want it to.",
 )
 async def chat(
     interaction: Interaction,
-    chat_prompt: str,
+    prompt: str,
     keep_chatting: Literal["Yes", "No"] = "No",
     chat_model: Literal["gpt-5-mini", "gpt-5", "gpt-4.1", "gpt-4.1-mini"] = "gpt-4.1-mini",
     custom_instructions: Optional[str] = None,
@@ -489,7 +505,7 @@ async def chat(
     context = await create_command_context(
         interaction,
         params={
-            "chat_prompt": chat_prompt,
+            "chat_prompt": prompt,
             "topic": str(interaction.user.id),
             "custom_instructions": custom_instructions,
             "keep_chatting": keep_chatting == "Yes",
@@ -501,18 +517,32 @@ async def chat(
 
     try:
         response = await new_response(
-            context=context, prompt=chat_prompt, instructions=custom_instructions, model=chat_model
+            context=context, prompt=prompt, instructions=custom_instructions, model=chat_model
         )
-    except BadRequestError:
-        await interaction.followup.send(
-            f"Your prompt:\n> {chat_prompt}\nProbably violated OpenAI's content policies. Clean up your act."
-        )
+    except BadRequestError as e:
+        failure_followup = {
+            "embed": construct_error_embed(
+                context=context,
+                user_input=prompt,
+                fields={
+                    "Error Code": f"`{e.body.get('code')}`",
+                    "Error Type": f"`{e.body.get('type')}`",
+                    "Error Message": e.body.get("message"),
+                    "Request ID": f"`{e.request_id}`",
+                    "Guidelines URL": "https://platform.openai.com/docs/guides/safety-checks",
+                    "Charged Credits": "False",
+                },
+            )
+        }
+
+        await interaction.followup.send(**failure_followup)
+
         return await context.save()
 
     title = f"🤖 `{chat_model}` Response{' (Continued)' if response.previous_response_id else ''}"
     embed = Embed(title=title, description=response.output_text, color=1752220)
 
-    await interaction.followup.send(content=f"> {chat_prompt}", embed=embed)
+    await interaction.followup.send(content=f"> {prompt}", embed=embed)
 
     return await context.save()
 
@@ -547,13 +577,18 @@ async def balance(interaction: Interaction) -> bool:
         costs_list.append(f"- `{key}`: {value} credits")
     costs_message = "\n".join(costs_list)
 
-    message = (
-        f"{interaction.user.name} has {current_credits} B4NG AI credits.\n\n"
-        f"Model costs in B4NG AI credits:\n{costs_message}\n"
-        "Note: video models are a 'per second' credit cost."
+    embed = Embed(
+        title="B4NG AI Credit Balance and Model Costs",
+        color=15844367,
+        description=(
+            f"Model costs in B4NG AI credits:\n{costs_message}\n" "Note: video models are a 'per second' credit cost."
+        ),
     )
+    embed.add_field(name="User", value=f"<@{interaction.user.id}>", inline=False)
+    embed.add_field(name="Credits", value=f"`{current_credits}`", inline=False)
+    embed.add_field(name="Tip Link", value="$1.00 = 100 credits\nhttps://paypal.me/zfleeman", inline=False)
 
-    await interaction.response.send_message(content=message)
+    await interaction.response.send_message(embed=embed)
 
     return await context.save()
 

@@ -47,17 +47,20 @@ def has_enough_credits(user_credits: int, deduction: int) -> bool:
 def construct_error_embed(
     context: CommandContext, user_input: Optional[str] = "", fields: Optional[dict] = None
 ) -> Embed:
+    """
+    Create an embed object for standard "error reporting" to the end user
+    """
     description = ""
 
     if user_input:
         description += f"User Input:\n> {user_input}"
 
     embed = Embed(title="B4NG AI Generation Error", color=15548997)
-    embed.add_field(name="User", value=f"<@{context.user_id}>")
+    embed.add_field(name="User", value=f"<@{context.user_id}>", inline=False)
 
     if fields:
         for field in fields:
-            embed.add_field(name=field, value=fields[field])
+            embed.add_field(name=field, value=fields[field], inline=False)
 
     embed.description = description
 
