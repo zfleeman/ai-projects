@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from urllib.request import Request, urlopen
 
+from discord import Embed
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
@@ -34,6 +35,36 @@ def download_file_from_url(url: str, filename: str, headers: dict = None) -> Non
         data = response.read()
         with open(filename, "wb") as f:
             f.write(data)
+
+
+def has_enough_credits(user_credits: int, deduction: int) -> bool:
+    """
+    Check to see if the user has enough credits to use the model
+    """
+    return user_credits - deduction >= 0
+
+
+def construct_error_embed(
+    context: CommandContext, user_input: Optional[str] = "", fields: Optional[dict] = None
+) -> Embed:
+    """
+    Create an embed object for standard "error reporting" to the end user
+    """
+    description = ""
+
+    if user_input:
+        description += f"User Input:\n> {user_input}"
+
+    embed = Embed(title="B4NG AI Generation Error", color=15548997)
+    embed.add_field(name="User", value=f"<@{context.user_id}>", inline=False)
+
+    if fields:
+        for field in fields:
+            embed.add_field(name=field, value=fields[field], inline=False)
+
+    embed.description = description
+
+    return embed
 
 
 async def get_openai_client(guild_id: int) -> AsyncOpenAI:
@@ -143,43 +174,3 @@ def content_path(context: CommandContext, file_name: str) -> Path:
     dir_path = Path(f"generated_content/guild_{context.guild_id}/{ts}/{context.command_name}")
     dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path / file_name
-
-
-def check_model_limit(context: CommandContext, usage_tracker: dict) -> bool:
-    """
-    A function to check if a model's usage has reached a limit specified in the config
-    """
-    config = get_config()
-    model: str = context.params.get("model")
-    usage_limits = {model: int(count) for model, count in config["OPENAI_MODEL_LIMITS"].items()}
-    limit = usage_limits.get(model)
-
-    # do not limit models that don't have a specified limit in the config
-    if not limit:
-        return True
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    # create a blank dictionary for a guild if it isn't present in the map already
-    if context.guild_id not in usage_tracker:
-        usage_tracker[context.guild_id] = {}
-
-    # initialize a model usage dict for the limited-use model
-    if model not in usage_tracker[context.guild_id]:
-        usage_tracker[context.guild_id][model] = {"count": 0, "last_reset": today, "limit": limit}
-
-    record = usage_tracker[context.guild_id][model]
-
-    # reset the usage on a new day
-    if record["last_reset"] != today:
-        record["count"] = 0
-        record["last_reset"] = today
-        record["limit"] = limit
-
-    if record["count"] >= limit:
-        return False  # Limit reached
-
-    # increment the count
-    record["count"] += 1
-
-    return True

@@ -39,6 +39,16 @@ class CommandContext(SQLModel, table=True):
         return True
 
 
+class Credits(SQLModel, table=True):
+    """
+    Table for user "expensive model" credits
+    """
+
+    user_id: int = Field(default=None, primary_key=True)
+    credits: int
+    updated: datetime
+
+
 class Key(SQLModel, table=True):
     """
     Table for storing OpenAI API keys.
@@ -156,6 +166,61 @@ async def get_api_key(guild_id: int) -> str:
             raise ValueError(f"No API token found for guild_id: {guild_id}")
 
         return cipher.decrypt(key_record.api_key.encode()).decode()
+
+
+async def get_user_credits(user_id: int) -> int:
+    """
+    Return a user's credits
+    """
+
+    with get_session() as session:
+        statement = select(Credits).where(Credits.user_id == user_id)
+        results = session.exec(statement=statement)
+        user_record = results.one_or_none()
+
+        if user_record:
+            return user_record.credits
+
+        entry = Credits(
+            user_id=user_id,
+            credits=0,
+            updated=datetime.now(),
+        )
+        session.add(entry)
+        session.commit()
+
+        return 0
+
+
+async def add_credits(user_id: int, num_credits: int) -> int:
+    """
+    Add credits to user's balance and return the new value
+    """
+
+    with get_session() as session:
+        statement = select(Credits).where(Credits.user_id == user_id)
+        results = session.exec(statement=statement)
+        user_record = results.one_or_none()
+
+        if user_record:
+            user_record.credits += num_credits
+            new_credits = user_record.credits
+            user_record.updated = datetime.now()
+            session.add(user_record)
+            session.commit()
+
+            return new_credits
+
+        else:
+            entry = Credits(
+                user_id=user_id,
+                credits=num_credits,
+                updated=datetime.now(),
+            )
+            session.add(entry)
+            session.commit()
+
+            return num_credits
 
 
 if __name__ == "__main__":
