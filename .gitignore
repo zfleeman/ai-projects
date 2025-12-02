@@ -10,6 +10,9 @@
 !/openai-discord-bot/
 !/openai-discord-bot/**
 
+!/scripts/
+!scripts/**
+
 # Additional ignores
 /openai-discord-bot/generated_content/
 /openai-discord-bot/database.db
