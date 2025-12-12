@@ -308,6 +308,10 @@ async def video(
     model: Literal["sora-2", "sora-2-pro"] = "sora-2",
     size: Literal["720x1280", "1280x720"] = "1280x720",
 ) -> bool:
+    
+    if model == "sora-2":
+        model = "sora-2-2025-12-08"
+
     context = await create_command_context(
         interaction,
         params={"prompt": prompt, "model": model, "seconds": seconds, "size": size},
