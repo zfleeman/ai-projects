@@ -218,7 +218,7 @@ async def image(
     embed = Embed(
         color=10181046,
         title=f"`{model}` Image Generation",
-        description=f"### User Input:\n> {prompt}",
+        description=f"### User Input:\n> {prompt[:4050]}",
     )
 
     # gpt-image-1 has some special use cases that don't apply to dall-e-2/3
