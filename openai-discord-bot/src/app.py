@@ -196,7 +196,7 @@ async def say(
 @app_commands.describe(
     prompt="The prompt used for image generation.",
     model="The OpenAI image model to use.",
-    background="Allows to set transparency for the background of the generated image(s). gpt-image-1 only.",
+    background="Allows to set transparency for the background of the generated image(s). gpt-image-1* models only.",
 )
 async def image(
     interaction: Interaction,
