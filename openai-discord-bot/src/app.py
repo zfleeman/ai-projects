@@ -196,12 +196,12 @@ async def say(
 @app_commands.describe(
     prompt="The prompt used for image generation.",
     model="The OpenAI image model to use.",
-    background="Allows to set transparency for the background of the generated image(s). gpt-image-1 only.",
+    background="Allows to set transparency for the background of the generated image(s). gpt-image-1* models only.",
 )
 async def image(
     interaction: Interaction,
     prompt: str,
-    model: Literal["dall-e-2", "dall-e-3", "gpt-image-1", "gpt-image-1-mini"] = "gpt-image-1-mini",
+    model: Literal["dall-e-2", "dall-e-3", "gpt-image-1.5", "gpt-image-1-mini"] = "gpt-image-1-mini",
     background: Literal["transparent", "opaque", "auto"] = "auto",
 ) -> bool:
     context = await create_command_context(
@@ -280,7 +280,7 @@ async def image(
     # set the footer based on model
     if image_object.revised_prompt:
         embed.set_footer(text=f"Revised Prompt:\n{image_object.revised_prompt}")
-    elif model == "gpt-image-1":
+    elif model == "gpt-image-1.5":
         remaining_credits = await add_credits(user_id=interaction.user.id, num_credits=-model_cost)
         embed.set_footer(text=f"{interaction.user.name} has {remaining_credits} B4NG AI credits remaining.")
 
